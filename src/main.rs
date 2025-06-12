@@ -1,12 +1,15 @@
 mod cli;
 mod dbus_listener;
+mod error;
+mod retry;
 
 use clap::Parser;
 use dbus_listener::DBusListener;
+use error::AppError;
 use log::debug;
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), AppError> {
     // Initialize logger
     env_logger::init();
 
@@ -28,11 +31,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Create and start the D-Bus listener
     let listener = DBusListener::new(config.interface, config.member, config.type_handler);
 
-    // Simply return the error - no need for manual exit
-    listener.listen().await?;
+    // Handle errors by printing error codes for waybar
+    if let Err(error) = listener.listen().await {
+        error.print_error_code();
+        eprintln!("Fatal error: {}", error);
+        return Err(error);
+    }
 
     Ok(())
 }

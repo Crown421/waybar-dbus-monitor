@@ -1,7 +1,8 @@
 use crate::cli::TypeHandler;
+use crate::error::AppError;
+use crate::retry::retry_dbus_operation;
 use futures_lite::stream::StreamExt;
 use log::{debug, error};
-use std::error::Error;
 use zbus::{Connection, MatchRule, MessageStream};
 
 pub struct DBusListener {
@@ -19,26 +20,85 @@ impl DBusListener {
         }
     }
 
-    /// Establish connection and listen for D-Bus signals
-    pub async fn listen(&self) -> Result<(), Box<dyn Error>> {
+    /// Establish connection and listen for D-Bus signals with retry logic
+    pub async fn listen(&self) -> Result<(), AppError> {
+        // Combine connection and stream setup into single retryable operation
+        let mut stream = retry_dbus_operation(
+            || async {
+                let connection = self.establish_connection().await?;
+                self.setup_message_stream(&connection).await
+            },
+            "D-Bus connection and setup",
+        )
+        .await?;
+
+        debug!("Listening for D-Bus signals...");
+
+        // Main listening loop - now we only receive messages that match our criteria
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Ok(message) => {
+                    if let Err(e) = self.process_message(&message) {
+                        // Print error code to stdout for waybar
+                        e.print_error_code();
+                        error!("Error processing message: {}", e);
+                        // Continue listening rather than crashing on a single message error
+                    }
+                }
+                Err(e) => {
+                    let app_error = AppError::from(e);
+                    app_error.print_error_code();
+                    error!("Error receiving message: {}", app_error);
+                    return Err(app_error);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Establish D-Bus connection with fallback from session to system bus
+    async fn establish_connection(&self) -> Result<Connection, AppError> {
         // Try to connect to session bus first, fallback to system bus
-        let connection = match Connection::session().await {
+        match Connection::session().await {
             Ok(conn) => {
                 debug!("Connected to session bus");
-                conn
+                Ok(conn)
             }
             Err(e) => {
                 debug!("Failed to connect to session bus: {}", e);
                 debug!("Trying system bus");
-                Connection::system().await?
-            }
-        };
 
+                match Connection::system().await {
+                    Ok(conn) => {
+                        debug!("Connected to system bus");
+                        Ok(conn)
+                    }
+                    Err(system_err) => {
+                        error!("Failed to connect to both session and system bus");
+                        error!("Session bus error: {}", e);
+                        error!("System bus error: {}", system_err);
+                        Err(AppError::connection_failed(system_err))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Setup message stream for the specific signal
+    async fn setup_message_stream(
+        &self,
+        connection: &Connection,
+    ) -> Result<MessageStream, AppError> {
         // Create a match rule for the specific signal
         let match_rule = MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
-            .interface(self.interface.as_str())?
-            .member(self.member.as_str())?
+            .interface(self.interface.as_str())
+            .map_err(|e| {
+                AppError::not_found(format!("Invalid interface '{}': {}", self.interface, e))
+            })?
+            .member(self.member.as_str())
+            .map_err(|e| AppError::not_found(format!("Invalid member '{}': {}", self.member, e)))?
             .build();
 
         debug!(
@@ -48,31 +108,25 @@ impl DBusListener {
 
         // Create a filtered message stream for our match rule
         // This automatically registers the rule with the bus
-        let mut stream = MessageStream::for_match_rule(match_rule, &connection, None).await?;
-
-        debug!("Listening for D-Bus signals...");
-
-        // Main listening loop - now we only receive messages that match our criteria
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(message) => {
-                    if let Err(e) = self.process_message(&message) {
-                        error!("Error processing message: {}", e);
-                        // Continue listening rather than crashing on a single message error
-                    }
+        let stream = MessageStream::for_match_rule(match_rule, connection, None)
+            .await
+            .map_err(|e| {
+                // Check if this is a "not found" type error
+                if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
+                    AppError::service_unavailable(format!(
+                        "D-Bus interface '{}' or member '{}' not available",
+                        self.interface, self.member
+                    ))
+                } else {
+                    AppError::from(e)
                 }
-                Err(e) => {
-                    error!("Error receiving message: {}", e);
-                    return Err(e.into());
-                }
-            }
-        }
+            })?;
 
-        Ok(())
+        Ok(stream)
     }
 
     /// Process a single D-Bus message and print the result
-    fn process_message(&self, message: &zbus::Message) -> Result<(), Box<dyn Error>> {
+    fn process_message(&self, message: &zbus::Message) -> Result<(), AppError> {
         let body = message.body();
 
         // Try to deserialize as a single Value - this handles most cases
@@ -82,14 +136,20 @@ impl DBusListener {
                     println!("{}", output);
                     Ok(())
                 } else {
-                    Err(format!("Failed to process signal value: {:?}", value).into())
+                    Err(AppError::message_processing(format!(
+                        "Failed to process signal value: {:?}",
+                        value
+                    )))
                 }
             }
             Err(e) => {
                 error!("Failed to deserialize message body: {}", e);
                 debug!("Message signature: {:?}", message.body().signature());
                 debug!("Raw body: {:?}", body);
-                Err(e.into())
+                Err(AppError::message_processing(format!(
+                    "Failed to deserialize message: {}",
+                    e
+                )))
             }
         }
     }
