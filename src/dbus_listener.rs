@@ -1,6 +1,7 @@
 use crate::cli::TypeHandler;
 use crate::error::AppError;
 use crate::retry::retry_dbus_operation;
+use crate::{error_message_processing, error_not_found, error_service_unavailable, report_error};
 use futures_lite::stream::StreamExt;
 use log::{debug, error};
 use zbus::{Connection, MatchRule, MessageStream};
@@ -39,16 +40,14 @@ impl DBusListener {
             match msg {
                 Ok(message) => {
                     if let Err(e) = self.process_message(&message) {
-                        // Print error code to stdout for waybar
-                        e.print_error_code();
-                        error!("Error processing message: {}", e);
+                        // Print error code to stdout for waybar and log error
+                        report_error!(e, "Error processing message");
                         // Continue listening rather than crashing on a single message error
                     }
                 }
                 Err(e) => {
                     let app_error = AppError::from(e);
-                    app_error.print_error_code();
-                    error!("Error receiving message: {}", app_error);
+                    report_error!(app_error, "Error receiving message");
                     return Err(app_error);
                 }
             }
@@ -91,14 +90,12 @@ impl DBusListener {
         connection: &Connection,
     ) -> Result<MessageStream, AppError> {
         // Create a match rule for the specific signal
-        let match_rule = MatchRule::builder()
+        let match_rule: MatchRule<'_> = MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
             .interface(self.interface.as_str())
-            .map_err(|e| {
-                AppError::not_found(format!("Invalid interface '{}': {}", self.interface, e))
-            })?
+            .map_err(|e| error_not_found!("Invalid interface '{}': {}", self.interface, e))?
             .member(self.member.as_str())
-            .map_err(|e| AppError::not_found(format!("Invalid member '{}': {}", self.member, e)))?
+            .map_err(|e| error_not_found!("Invalid member '{}': {}", self.member, e))?
             .build();
 
         debug!(
@@ -113,10 +110,11 @@ impl DBusListener {
             .map_err(|e| {
                 // Check if this is a "not found" type error
                 if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                    AppError::service_unavailable(format!(
+                    error_service_unavailable!(
                         "D-Bus interface '{}' or member '{}' not available",
-                        self.interface, self.member
-                    ))
+                        self.interface,
+                        self.member
+                    )
                 } else {
                     AppError::from(e)
                 }
@@ -136,20 +134,20 @@ impl DBusListener {
                     println!("{}", output);
                     Ok(())
                 } else {
-                    Err(AppError::message_processing(format!(
+                    Err(error_message_processing!(
                         "Failed to process signal value: {:?}",
                         value
-                    )))
+                    ))
                 }
             }
             Err(e) => {
                 error!("Failed to deserialize message body: {}", e);
                 debug!("Message signature: {:?}", message.body().signature());
                 debug!("Raw body: {:?}", body);
-                Err(AppError::message_processing(format!(
+                Err(error_message_processing!(
                     "Failed to deserialize message: {}",
                     e
-                )))
+                ))
             }
         }
     }

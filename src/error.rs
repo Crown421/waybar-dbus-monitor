@@ -1,8 +1,9 @@
-/// Error handling module with HTML-inspired error codes for waybar integration
+/// Error handling module with HTTP-inspired error codes for waybar integration
 ///
 /// This module defines error types that can be displayed as error codes (E<code>)
 /// to help waybar or other status bars understand the current state of the application.
 use std::fmt;
+use thiserror::Error;
 
 /// Error codes inspired by HTTP status codes for waybar display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,26 +47,33 @@ impl fmt::Display for ErrorCode {
 }
 
 /// Application-specific error type that maps to error codes
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum AppError {
     /// D-Bus connection errors
-    Connection(zbus::Error, ErrorCode),
+    #[error("D-Bus connection error: {0}")]
+    Connection(#[source] zbus::Error),
+
     /// D-Bus interface/member not found
-    NotFound(String, ErrorCode),
+    #[error("{0}")]
+    NotFound(String),
+
     /// Message processing errors
-    MessageProcessing(String, ErrorCode),
-    /// General errors
-    General(String, ErrorCode),
+    #[error("Message processing error: {0}")]
+    MessageProcessing(String),
+
+    /// General errors with flexible error codes
+    #[error("{1}")]
+    General(ErrorCode, String),
 }
 
 impl AppError {
     /// Get the error code for this error
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            AppError::Connection(_, code) => *code,
-            AppError::NotFound(_, code) => *code,
-            AppError::MessageProcessing(_, code) => *code,
-            AppError::General(_, code) => *code,
+            AppError::Connection(_) => ErrorCode::BadGateway,
+            AppError::NotFound(_) => ErrorCode::NotFound,
+            AppError::MessageProcessing(_) => ErrorCode::UnprocessableEntity,
+            AppError::General(code, _) => *code,
         }
     }
 
@@ -76,22 +84,22 @@ impl AppError {
 
     /// Create a connection error
     pub fn connection_failed(err: zbus::Error) -> Self {
-        AppError::Connection(err, ErrorCode::BadGateway)
+        AppError::Connection(err)
     }
 
     /// Create a service unavailable error
     pub fn service_unavailable(msg: impl Into<String>) -> Self {
-        AppError::General(msg.into(), ErrorCode::ServiceUnavailable)
+        AppError::General(ErrorCode::ServiceUnavailable, msg.into())
     }
 
     /// Create a not found error
     pub fn not_found(msg: impl Into<String>) -> Self {
-        AppError::NotFound(msg.into(), ErrorCode::NotFound)
+        AppError::NotFound(msg.into())
     }
 
     /// Create a message processing error
     pub fn message_processing(msg: impl Into<String>) -> Self {
-        AppError::MessageProcessing(msg.into(), ErrorCode::UnprocessableEntity)
+        AppError::MessageProcessing(msg.into())
     }
 
     /// Check if this error represents a permanent failure that shouldn't be retried
@@ -105,32 +113,39 @@ impl AppError {
     }
 }
 
-impl fmt::Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AppError::Connection(err, code) => {
-                write!(f, "{}: D-Bus connection error: {}", code, err)
-            }
-            AppError::NotFound(msg, code) => {
-                write!(f, "{}: {}", code, msg)
-            }
-            AppError::MessageProcessing(msg, code) => {
-                write!(f, "{}: Message processing error: {}", code, msg)
-            }
-            AppError::General(msg, code) => {
-                write!(f, "{}: {}", code, msg)
-            }
-        }
-    }
+/// Convenience macro for error reporting (prints error code and logs error)
+#[macro_export]
+macro_rules! report_error {
+    ($error:expr) => {
+        $error.print_error_code();
+        log::error!("Error: {}", $error);
+    };
+    ($error:expr, $msg:expr) => {
+        $error.print_error_code();
+        log::error!("{}: {}", $msg, $error);
+    };
 }
 
-impl std::error::Error for AppError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            AppError::Connection(err, _) => Some(err),
-            _ => None,
-        }
-    }
+/// Convenience macros for streamlined error creation
+#[macro_export]
+macro_rules! error_not_found {
+    ($($arg:tt)*) => {
+        $crate::error::AppError::not_found(format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! error_service_unavailable {
+    ($($arg:tt)*) => {
+        $crate::error::AppError::service_unavailable(format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! error_message_processing {
+    ($($arg:tt)*) => {
+        $crate::error::AppError::message_processing(format!($($arg)*))
+    };
 }
 
 impl From<zbus::Error> for AppError {
@@ -138,10 +153,10 @@ impl From<zbus::Error> for AppError {
         // Map specific zbus errors to appropriate error codes
         match &err {
             zbus::Error::MethodError(name, _, _) if name.contains("NotFound") => {
-                AppError::not_found(format!("D-Bus method not found: {}", err))
+                error_not_found!("D-Bus method not found: {}", err)
             }
             zbus::Error::InterfaceNotFound => {
-                AppError::service_unavailable("D-Bus interface not found")
+                error_service_unavailable!("D-Bus interface not found")
             }
             // For most other zbus errors, treat as connection issues
             _ => AppError::connection_failed(err),
