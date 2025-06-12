@@ -1,10 +1,9 @@
-use crate::cli::Config;
+use crate::cli::{Config, TypeHandler};
 use crate::error::AppError;
 use crate::retry::{RetryConfig, retry_operation, retry_operation_with_config};
 use crate::{error_message_processing, error_not_found, report_error};
 use futures_lite::stream::StreamExt;
 use log::debug;
-use std::io::Write;
 use zbus::{Connection, MatchRule, MessageStream, Proxy};
 
 pub struct DBusListener {
@@ -59,12 +58,8 @@ impl DBusListener {
             // Handle the result after retries
             match initial_state_result {
                 Ok(value) => {
-                    if self.config.type_handler.process_and_print(&value) {
-                        // Flush stdout
-                        if let Err(e) = std::io::stdout().flush() {
-                            debug!("error: Failed to flush stdout: {}", e);
-                        }
-                    }
+                    // Process and print the value (stdout flushing is handled internally)
+                    self.config.type_handler.process_and_print(&value);
                 }
                 Err(e) => {
                     // If it's a service unavailable error after all retries, exit with proper error code
@@ -176,13 +171,30 @@ impl DBusListener {
         let body = message.body();
         debug!("Processing message with signature: {:?}", body.signature());
 
-        if self.config.type_handler.deserialize_and_process(&body) {
-            Ok(())
-        } else {
-            Err(error_message_processing!(
-                "Failed to process signal with signature: {:?}",
-                body.signature()
-            ))
+        // Use the optimized deserialization path based on the expected type
+        match &self.config.type_handler {
+            TypeHandler::Boolean { .. } => {
+                match self.config.type_handler.deserialize_from_message(message) {
+                    Ok(bool_value) => {
+                        if let Err(e) = self.config.type_handler.print_boolean_output(bool_value) {
+                            debug!("error: Failed to print boolean output: {}", e);
+                            return Err(error_message_processing!(
+                                "Failed to print boolean output: {}",
+                                e
+                            ));
+                        }
+                        Ok(())
+                    }
+                    Err(e) => {
+                        debug!("error: {}", e);
+                        Err(error_message_processing!(
+                            "Failed to deserialize signal with signature: {:?}",
+                            body.signature()
+                        ))
+                    }
+                }
+            } // Add cases for other type handlers as they're implemented
+              // For now, this just covers the Boolean case
         }
     }
 }
