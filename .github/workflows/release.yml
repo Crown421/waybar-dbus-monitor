@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    # tags:
+    #   - 'v*'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    container: rust:1.87
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build binary
+      run: cargo build --release
+
+    - name: Package binary
+      run: |
+        mkdir -p release
+        cp target/release/waybar-dbus-monitor release/
+        cd release
+        tar -czf waybar-dbus-monitor-x86_64-unknown-linux-gnu.tar.gz waybar-dbus-monitor
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: waybar-dbus-monitor-x86_64-unknown-linux-gnu
+        path: release/waybar-dbus-monitor-x86_64-unknown-linux-gnu.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare release files
+      run: |
+        mkdir -p release-files
+        find artifacts -name "*.tar.gz" -exec cp {} release-files/ \;
+        ls -la release-files/
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      if: github.ref_type == 'tag'
+      with:
+        files: release-files/*
+        generate_release_notes: true
