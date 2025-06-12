@@ -1,3 +1,4 @@
+use crate::cli::TypeHandler;
 use futures_util::stream::StreamExt;
 use std::error::Error;
 use zbus::{Connection, MatchRule, MessageStream};
@@ -5,11 +6,16 @@ use zbus::{Connection, MatchRule, MessageStream};
 pub struct DBusListener {
     pub interface: String,
     pub member: String,
+    pub type_handler: TypeHandler,
 }
 
 impl DBusListener {
-    pub fn new(interface: String, member: String) -> Self {
-        Self { interface, member }
+    pub fn new(interface: String, member: String, type_handler: TypeHandler) -> Self {
+        Self {
+            interface,
+            member,
+            type_handler,
+        }
     }
 
     /// Establish connection and listen for D-Bus signals
@@ -50,11 +56,35 @@ impl DBusListener {
                 Ok(message) => {
                     let body = message.body();
 
-                    // Print the matched signal to stdout
-                    println!("Received signal: {:?}", body);
-
-                    // Debug info
-                    eprintln!("Raw body: {:?}", body);
+                    // For boolean signals, try to deserialize directly as boolean first
+                    if let Ok(bool_value) = body.deserialize::<(bool,)>() {
+                        let value = zbus::zvariant::Value::Bool(bool_value.0);
+                        match self.type_handler.process(&value) {
+                            Some(output) => {
+                                println!("{}", output);
+                            }
+                            None => {
+                                eprintln!("Failed to process boolean value: {}", bool_value.0);
+                            }
+                        }
+                    } else {
+                        // Fallback: try to get as generic Value tuple
+                        match body.deserialize::<(zbus::zvariant::Value,)>() {
+                            Ok((value,)) => match self.type_handler.process(&value) {
+                                Some(output) => {
+                                    println!("{}", output);
+                                }
+                                None => {
+                                    eprintln!("Failed to process signal value: {:?}", value);
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to deserialize message body: {}", e);
+                                eprintln!("Message signature: {:?}", message.body().signature());
+                                eprintln!("Raw body: {:?}", body);
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error receiving message: {}", e);

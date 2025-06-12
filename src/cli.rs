@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use zbus::zvariant;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -31,4 +32,26 @@ pub enum TypeHandler {
     // Future expansion:
     // String { ... },
     // Integer { ... },
+}
+
+impl TypeHandler {
+    /// Process the raw D-Bus data and return the string to print
+    pub fn process(&self, body: &zvariant::Value) -> Option<String> {
+        match self {
+            TypeHandler::Boolean {
+                return_true,
+                return_false,
+            } => {
+                if let zvariant::Value::Bool(b) = body {
+                    let output = if *b { return_true } else { return_false };
+                    Some(output.clone())
+                } else {
+                    // Log an error if the type doesn't match
+                    eprintln!("Warning: Expected boolean, got {:?}", body);
+                    None
+                }
+            } // Future:
+              // TypeHandler::String { prefix, suffix } => { ... }
+        }
+    }
 }
