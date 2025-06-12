@@ -53,8 +53,8 @@ async fn main() -> Result<(), AppError> {
     if let Err(error) = listener.listen().await {
         debug!("error: Fatal error: {}", error);
 
-        // Print error code for waybar
-        println!("ERROR {}", error.error_code());
+        // Print only the error code for waybar (e.g., "E502")
+        error.print_error_code();
         std::process::exit(error.error_code().code() as i32);
     }
 

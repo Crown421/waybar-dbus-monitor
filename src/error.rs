@@ -76,7 +76,6 @@ impl AppError {
             AppError::General(code, _) => *code,
         }
     }
-
     /// Print the error code to stdout for waybar
     pub fn print_error_code(&self) {
         println!("{}", self.error_code().format_for_waybar());

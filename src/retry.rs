@@ -81,17 +81,33 @@ where
                 return Ok(result);
             }
             Err(error) => {
-                debug!(
-                    "warn: {} failed on attempt {}/{}: {}",
-                    operation_name,
-                    attempt + 1,
-                    config.max_attempts,
-                    error
-                );
+                // Print error code and log the error if this is not the first attempt
+                // For first attempt, don't show error codes to avoid flicker
+                if attempt > 0 {
+                    // Print only the error code, no additional text
+                    error.print_error_code();
+                    debug!(
+                        "warn: {} failed on attempt {}/{}: {}",
+                        operation_name,
+                        attempt + 1,
+                        config.max_attempts,
+                        error
+                    );
+                } else {
+                    debug!(
+                        "warn: {} failed on attempt {}/{}: {}",
+                        operation_name,
+                        attempt + 1,
+                        config.max_attempts,
+                        error
+                    );
+                }
 
                 // Check if this is a permanent error that shouldn't be retried
                 if error.is_permanent() {
                     debug!("Permanent error detected, stopping retries: {}", error);
+                    // Print only the error code for permanent errors, no additional text
+                    error.print_error_code();
                     return Err(error);
                 }
 
@@ -101,7 +117,10 @@ where
     }
 
     // All attempts failed, return the last error
-    Err(last_error.unwrap())
+    let final_error = last_error.unwrap();
+    // Print only the error code after all retries are exhausted, no additional text
+    final_error.print_error_code();
+    Err(final_error)
 }
 
 /// Streamlined retry function with default config
