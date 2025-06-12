@@ -1,7 +1,7 @@
 use crate::cli::Config;
 use crate::error::AppError;
-use crate::retry::retry_dbus_operation;
-use crate::{error_message_processing, error_not_found, error_service_unavailable, report_error};
+use crate::retry::{RetryConfig, retry_operation, retry_operation_with_config};
+use crate::{error_message_processing, error_not_found, report_error};
 use futures_lite::stream::StreamExt;
 use log::{debug, error, warn};
 use std::io::Write;
@@ -18,9 +18,11 @@ impl DBusListener {
 
     /// Establish connection and listen for D-Bus signals with retry logic
     pub async fn listen(&self) -> Result<(), AppError> {
-        let connection = retry_dbus_operation(
+        // Use default retry configuration for connection
+        let connection = retry_operation_with_config(
             || async { self.establish_connection().await },
             "D-Bus connection",
+            RetryConfig::default(),
         )
         .await?;
 
@@ -32,21 +34,32 @@ impl DBusListener {
                 return Err(error_not_found!("Invalid status format: {}", e));
             }
         } {
-            let proxy = Proxy::new(
-                &connection,
-                status_config.service.as_str(),
-                status_config.object_path.as_str(),
-                status_config.interface.as_str(),
-            )
-            .await?;
+            // Wrap the property query in retry for service availability
+            let initial_state_result = retry_operation_with_config(
+                || async {
+                    let proxy = Proxy::new(
+                        &connection,
+                        status_config.service.as_str(),
+                        status_config.object_path.as_str(),
+                        status_config.interface.as_str(),
+                    )
+                    .await?;
 
-            match proxy
-                .get_property::<zbus::zvariant::Value>(&status_config.property)
-                .await
-            {
+                    let value = proxy
+                        .get_property::<zbus::zvariant::Value>(&status_config.property)
+                        .await?;
+
+                    Ok::<_, AppError>(value)
+                },
+                "initial property query",
+                RetryConfig::default(),
+            )
+            .await;
+
+            // Handle the result after retries
+            match initial_state_result {
                 Ok(value) => {
-                    if let Some(output) = self.config.type_handler.process(&value) {
-                        println!("{}", output);
+                    if self.config.type_handler.process_and_print(&value) {
                         // Flush stdout
                         if let Err(e) = std::io::stdout().flush() {
                             error!("Failed to flush stdout: {}", e);
@@ -54,30 +67,21 @@ impl DBusListener {
                     }
                 }
                 Err(e) => {
-                    // Check if this is a "not found" type error for interface/service availability
-                    if e.to_string().contains("not found")
-                        || e.to_string().contains("NotFound")
-                        || e.to_string().contains("ServiceUnknown")
-                        || e.to_string().contains("UnknownObject")
-                    {
-                        return Err(error_service_unavailable!(
-                            "D-Bus interface '{}' or monitor '{}' not available: {}",
-                            self.config.interface,
-                            self.config.monitor,
-                            e
-                        ));
-                    } else {
-                        warn!(
-                            "Warning: Could not get initial property '{}': {}",
-                            status_config.property, e
-                        );
+                    // If it's a service unavailable error after all retries, exit with proper error code
+                    if matches!(e.error_code(), crate::error::ErrorCode::ServiceUnavailable) {
+                        return Err(e);
                     }
+                    // For other errors, just log a warning rather than failing completely
+                    warn!(
+                        "Warning: Could not get initial property '{}' after retries: {}",
+                        status_config.property, e
+                    );
                 }
             }
         }
 
         // --- PHASE 2: Signal Listening ---
-        let mut stream = retry_dbus_operation(
+        let mut stream = retry_operation(
             || async { self.setup_message_stream(&connection).await },
             "D-Bus message stream setup",
         )
@@ -98,7 +102,12 @@ impl DBusListener {
                 Err(e) => {
                     let app_error = AppError::from(e);
                     report_error!(app_error, "Error receiving message");
-                    return Err(app_error);
+
+                    // Only exit if this is a permanent connection error
+                    if matches!(app_error.error_code(), crate::error::ErrorCode::BadGateway) {
+                        return Err(app_error);
+                    }
+                    // Otherwise continue listening for new messages
                 }
             }
         }
@@ -165,29 +174,15 @@ impl DBusListener {
     /// Process a single D-Bus message and print the result
     fn process_message(&self, message: &zbus::Message) -> Result<(), AppError> {
         let body = message.body();
+        debug!("Processing message with signature: {:?}", body.signature());
 
-        // Try to deserialize as a single Value - this handles most cases
-        match body.deserialize::<(zbus::zvariant::Value,)>() {
-            Ok((value,)) => {
-                if let Some(output) = self.config.type_handler.process(&value) {
-                    println!("{}", output);
-                    Ok(())
-                } else {
-                    Err(error_message_processing!(
-                        "Failed to process signal value: {:?}",
-                        value
-                    ))
-                }
-            }
-            Err(e) => {
-                error!("Failed to deserialize message body: {}", e);
-                debug!("Message signature: {:?}", message.body().signature());
-                debug!("Raw body: {:?}", body);
-                Err(error_message_processing!(
-                    "Failed to deserialize message: {}",
-                    e
-                ))
-            }
+        if self.config.type_handler.deserialize_and_process(&body) {
+            Ok(())
+        } else {
+            Err(error_message_processing!(
+                "Failed to process signal with signature: {:?}",
+                body.signature()
+            ))
         }
     }
 }

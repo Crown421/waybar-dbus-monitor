@@ -158,6 +158,25 @@ impl From<zbus::Error> for AppError {
             zbus::Error::InterfaceNotFound => {
                 error_service_unavailable!("D-Bus interface not found")
             }
+            // Handle various service unavailability errors
+            zbus::Error::MethodError(name, _, _)
+                if name.contains("ServiceUnknown")
+                    || name.contains("UnknownObject")
+                    || name.contains("UnknownInterface") =>
+            {
+                error_service_unavailable!("D-Bus service not available: {}", err)
+            }
+            // Check error message for service unavailability indicators
+            _ if err.to_string().contains("not found")
+                || err.to_string().contains("NotFound")
+                || err.to_string().contains("ServiceUnknown")
+                || err.to_string().contains("UnknownObject")
+                || err.to_string().contains("UnknownInterface")
+                || err.to_string().contains("service does not exist")
+                || err.to_string().contains("No such service") =>
+            {
+                error_service_unavailable!("D-Bus service not available: {}", err)
+            }
             // For most other zbus errors, treat as connection issues
             _ => AppError::connection_failed(err),
         }

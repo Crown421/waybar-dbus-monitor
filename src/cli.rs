@@ -123,8 +123,9 @@ pub enum TypeHandler {
 }
 
 impl TypeHandler {
-    /// Process the raw D-Bus data and return the string to print
-    pub fn process(&self, body: &zvariant::Value) -> Option<String> {
+    /// Process the raw D-Bus data and print the result directly
+    /// Returns true if processing was successful, false otherwise
+    pub fn process_and_print(&self, body: &zvariant::Value) -> bool {
         match self {
             TypeHandler::Boolean {
                 return_true,
@@ -132,11 +133,40 @@ impl TypeHandler {
             } => {
                 if let zvariant::Value::Bool(b) = body {
                     let output = if *b { return_true } else { return_false };
-                    Some(output.clone())
+                    println!("{}", output);
+                    true
                 } else {
                     // Log an error if the type doesn't match
                     warn!("Expected boolean, got {:?}", body);
-                    None
+                    false
+                }
+            }
+        }
+    }
+
+    /// Deserialize D-Bus message body and process it according to the type handler
+    /// Returns true if processing was successful, false otherwise
+    pub fn deserialize_and_process(&self, body: &zbus::message::Body) -> bool {
+        match self {
+            TypeHandler::Boolean {
+                return_true,
+                return_false,
+            } => {
+                // For boolean signals, we expect a direct boolean with signature "b"
+                match body.deserialize::<bool>() {
+                    Ok(value) => {
+                        let output = if value { return_true } else { return_false };
+                        println!("{}", output);
+                        true
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to deserialize boolean from signature '{}': {}",
+                            body.signature(),
+                            e
+                        );
+                        false
+                    }
                 }
             }
         }

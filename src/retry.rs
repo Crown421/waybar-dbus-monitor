@@ -8,44 +8,69 @@ use std::future::Future;
 use std::time::Duration;
 use tokio::time::sleep;
 
-/// D-Bus retry delays: [no delay, 1s, 2s]
-const DBUS_RETRY_DELAYS: [Duration; 3] = [
-    Duration::from_secs(0), // First attempt, no delay
-    Duration::from_secs(1), // Second attempt after 1s
-    Duration::from_secs(2), // Third attempt after 2s
-];
-
-/// Get the delay for a given attempt number (0-based)
-fn delay_for_attempt(attempt: usize) -> Duration {
-    DBUS_RETRY_DELAYS
-        .get(attempt)
-        .copied()
-        .unwrap_or(Duration::from_secs(5))
+/// Configuration for retry behavior
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    pub max_attempts: usize,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub backoff_factor: f64,
 }
 
-/// Streamlined retry function with fewer parameters
-pub async fn retry_operation<F, Fut, T>(operation: F, operation_name: &str) -> Result<T, AppError>
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 5,
+            initial_delay_ms: 500,
+            max_delay_ms: 5000,
+            backoff_factor: 1.5,
+        }
+    }
+}
+
+impl RetryConfig {
+    /// Calculate delay for a given attempt (0-based)
+    fn delay_for_attempt(&self, attempt: usize) -> Duration {
+        if attempt == 0 {
+            return Duration::from_millis(self.initial_delay_ms);
+        }
+
+        let delay_ms = (self.initial_delay_ms as f64 * self.backoff_factor.powi(attempt as i32))
+            .min(self.max_delay_ms as f64) as u64;
+
+        Duration::from_millis(delay_ms)
+    }
+}
+
+/// Streamlined retry function with configurable retry policy
+pub async fn retry_operation_with_config<F, Fut, T>(
+    operation: F,
+    operation_name: &str,
+    config: RetryConfig,
+) -> Result<T, AppError>
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<T, AppError>>,
 {
-    const MAX_ATTEMPTS: usize = 3;
     let mut last_error = None;
 
-    for attempt in 0..MAX_ATTEMPTS {
-        // Apply delay before retries (none on first attempt)
-        let delay = delay_for_attempt(attempt);
-        if attempt > 0 {
+    for attempt in 0..config.max_attempts {
+        // Apply delay before retries (configurable delay on first attempt)
+        let delay = config.delay_for_attempt(attempt);
+        if delay > Duration::from_millis(0) {
             debug!(
                 "Retrying {} (attempt {}/{}) after {:?} delay",
                 operation_name,
                 attempt + 1,
-                MAX_ATTEMPTS,
+                config.max_attempts,
                 delay
             );
             sleep(delay).await;
         } else {
-            debug!("Attempting {} (attempt 1/{})", operation_name, MAX_ATTEMPTS);
+            debug!(
+                "Attempting {} (attempt 1/{})",
+                operation_name, config.max_attempts
+            );
         }
 
         match operation().await {
@@ -60,7 +85,7 @@ where
                     "{} failed on attempt {}/{}: {}",
                     operation_name,
                     attempt + 1,
-                    MAX_ATTEMPTS,
+                    config.max_attempts,
                     error
                 );
 
@@ -79,14 +104,11 @@ where
     Err(last_error.unwrap())
 }
 
-/// Retry an operation specifically for D-Bus connections
-pub async fn retry_dbus_operation<F, Fut, T>(
-    operation: F,
-    operation_name: &str,
-) -> Result<T, AppError>
+/// Streamlined retry function with default config
+pub async fn retry_operation<F, Fut, T>(operation: F, operation_name: &str) -> Result<T, AppError>
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<T, AppError>>,
 {
-    retry_operation(operation, operation_name).await
+    retry_operation_with_config(operation, operation_name, RetryConfig::default()).await
 }
