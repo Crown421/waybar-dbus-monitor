@@ -68,7 +68,7 @@ impl DBusListener {
                 }
                 Err(e) => {
                     // If it's a service unavailable error after all retries, exit with proper error code
-                    if matches!(e.error_code(), crate::error::ErrorCode::ServiceUnavailable) {
+                    if matches!(e, AppError::ServiceUnavailable(_, _)) {
                         return Err(e);
                     }
                     // For other errors, just log a warning rather than failing completely
@@ -104,7 +104,7 @@ impl DBusListener {
                     report_error!(app_error, "Error receiving message");
 
                     // Only exit if this is a permanent connection error
-                    if matches!(app_error.error_code(), crate::error::ErrorCode::BadGateway) {
+                    if matches!(app_error, AppError::BadGateway(_, _)) {
                         return Err(app_error);
                     }
                     // Otherwise continue listening for new messages

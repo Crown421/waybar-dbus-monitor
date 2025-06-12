@@ -20,7 +20,7 @@ Check a property at startup and then monitor signals:
 
 ```bash
 # With root object path
-waybar-dbus-monitor --interface org.guayusa.Idle --monitor StatusChanged --status "org.guayusa.IdleInhibitor / org.guayusa.Idle Status" boolean --return-true "󰈈" --return-false "󰈉"
+waybar-dbus-monitor --interface org.guayusa.Idle --monitor StatusChanged --status "org.guayusa.IdleInhibitor/ org.guayusa.Idle Status" boolean --return-true "󰈈" --return-false "󰈉"
 
 # With full object path
 waybar-dbus-monitor --interface org.example.Test --monitor TestSignal --status "org.example.Service/org/example/Object org.example.Interface TestProperty" boolean --return-true "󰈈" --return-false "󰈉"
@@ -30,7 +30,7 @@ waybar-dbus-monitor --interface org.example.Test --monitor TestSignal --status "
 
 - `--interface`: D-Bus interface and service name to monitor
 - `--monitor`: D-Bus member (signal/method) to monitor
-- `--status`: (Optional) Initial status check in format "service/path interface property"
+- `--status`: (Optional) Initial status check in format "service/path interface property". The format must be exactly three whitespace-separated tokens with no spaces in the service/path part.
 
 ### Type Handlers
 

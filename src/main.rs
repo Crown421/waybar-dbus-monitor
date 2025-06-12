@@ -55,7 +55,7 @@ async fn main() -> Result<(), AppError> {
 
         // Print only the error code for waybar (e.g., "E502")
         error.print_error_code();
-        std::process::exit(error.error_code().code() as i32);
+        std::process::exit(error.code() as i32);
     }
 
     Ok(())
