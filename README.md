@@ -54,7 +54,3 @@ RUST_LOG=debug waybar-dbus-monitor --interface org.example.Interface --monitor S
 ```
 
 This will show detailed information about D-Bus connections, match rules, and signal processing.
-
-## Status
-
-🚧 **Work in Progress** - Currently implements CLI parsing. D-Bus monitoring functionality coming soon.

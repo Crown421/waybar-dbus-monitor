@@ -55,9 +55,9 @@ where
     let mut last_error = None;
 
     for attempt in 0..config.max_attempts {
-        // Apply delay before retries (configurable delay on first attempt)
-        let delay = config.delay_for_attempt(attempt);
-        if delay > Duration::from_millis(0) {
+        // Skip delay for the first attempt (attempt 0)
+        if attempt > 0 {
+            let delay = config.delay_for_attempt(attempt - 1);
             debug!(
                 "Retrying {} (attempt {}/{}) after {:?} delay",
                 operation_name,
