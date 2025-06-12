@@ -17,7 +17,7 @@ async fn main() -> Result<(), AppError> {
 
     // Validate configuration
     if let Err(e) = config.validate() {
-        eprintln!("Configuration error: {}", e);
+        debug!("error: Configuration error: {}", e);
         std::process::exit(1);
     }
 
@@ -49,11 +49,13 @@ async fn main() -> Result<(), AppError> {
 
     let listener = DBusListener::new(config);
 
-    // Handle errors by printing error codes for waybar
+    // Run the listener, catching any fatal errors
     if let Err(error) = listener.listen().await {
-        error.print_error_code();
-        eprintln!("Fatal error: {}", error);
-        return Err(error);
+        debug!("error: Fatal error: {}", error);
+
+        // Print error code for waybar
+        println!("ERROR {}", error.error_code());
+        std::process::exit(error.error_code().code() as i32);
     }
 
     Ok(())

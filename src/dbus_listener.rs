@@ -3,7 +3,7 @@ use crate::error::AppError;
 use crate::retry::{RetryConfig, retry_operation, retry_operation_with_config};
 use crate::{error_message_processing, error_not_found, report_error};
 use futures_lite::stream::StreamExt;
-use log::{debug, error, warn};
+use log::debug;
 use std::io::Write;
 use zbus::{Connection, MatchRule, MessageStream, Proxy};
 
@@ -30,7 +30,7 @@ impl DBusListener {
         if let Some(status_config) = match self.config.parse_status() {
             Ok(config) => config,
             Err(e) => {
-                error!("Failed to parse status configuration: {}", e);
+                debug!("error: Failed to parse status configuration: {}", e);
                 return Err(error_not_found!("Invalid status format: {}", e));
             }
         } {
@@ -62,7 +62,7 @@ impl DBusListener {
                     if self.config.type_handler.process_and_print(&value) {
                         // Flush stdout
                         if let Err(e) = std::io::stdout().flush() {
-                            error!("Failed to flush stdout: {}", e);
+                            debug!("error: Failed to flush stdout: {}", e);
                         }
                     }
                 }
@@ -72,8 +72,8 @@ impl DBusListener {
                         return Err(e);
                     }
                     // For other errors, just log a warning rather than failing completely
-                    warn!(
-                        "Warning: Could not get initial property '{}' after retries: {}",
+                    debug!(
+                        "warn: Could not get initial property '{}' after retries: {}",
                         status_config.property, e
                     );
                 }
@@ -133,9 +133,9 @@ impl DBusListener {
                         Ok(conn)
                     }
                     Err(system_err) => {
-                        error!("Failed to connect to both session and system bus");
-                        error!("Session bus error: {}", e);
-                        error!("System bus error: {}", system_err);
+                        debug!("error: Failed to connect to both session and system bus");
+                        debug!("error: Session bus error: {}", e);
+                        debug!("error: System bus error: {}", system_err);
                         Err(AppError::connection_failed(system_err))
                     }
                 }

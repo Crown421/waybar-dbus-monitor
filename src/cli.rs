@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use log::warn;
 use zbus::zvariant;
 
 #[derive(Parser, Debug)]
@@ -136,8 +135,8 @@ impl TypeHandler {
                     println!("{}", output);
                     true
                 } else {
-                    // Log an error if the type doesn't match
-                    warn!("Expected boolean, got {:?}", body);
+                    // Debug log if the type doesn't match
+                    log::debug!("warn: Expected boolean, got {:?}", body);
                     false
                 }
             }
@@ -160,8 +159,8 @@ impl TypeHandler {
                         true
                     }
                     Err(e) => {
-                        warn!(
-                            "Failed to deserialize boolean from signature '{}': {}",
+                        log::debug!(
+                            "error: Failed to deserialize boolean from signature '{}': {}",
                             body.signature(),
                             e
                         );

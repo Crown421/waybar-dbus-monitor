@@ -3,7 +3,7 @@
 /// This module provides retry functionality for operations that may fail
 /// temporarily, such as D-Bus connections or interface availability.
 use crate::error::AppError;
-use log::{debug, warn};
+use log::debug;
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -81,8 +81,8 @@ where
                 return Ok(result);
             }
             Err(error) => {
-                warn!(
-                    "{} failed on attempt {}/{}: {}",
+                debug!(
+                    "warn: {} failed on attempt {}/{}: {}",
                     operation_name,
                     attempt + 1,
                     config.max_attempts,

@@ -118,11 +118,11 @@ impl AppError {
 macro_rules! report_error {
     ($error:expr) => {
         $error.print_error_code();
-        log::error!("Error: {}", $error);
+        log::debug!("error: {}", $error);
     };
     ($error:expr, $msg:expr) => {
         $error.print_error_code();
-        log::error!("{}: {}", $msg, $error);
+        log::debug!("error: {}: {}", $msg, $error);
     };
 }
 
