@@ -1,4 +1,4 @@
-use crate::cli::{Config, TypeHandler};
+use crate::cli::Config;
 use crate::error::AppError;
 use crate::retry::{RetryConfig, retry_operation, retry_operation_with_config};
 use crate::{error_message_processing, error_not_found, report_error};
@@ -171,30 +171,17 @@ impl DBusListener {
         let body = message.body();
         debug!("Processing message with signature: {:?}", body.signature());
 
-        // Use the optimized deserialization path based on the expected type
-        match &self.config.type_handler {
-            TypeHandler::Boolean { .. } => {
-                match self.config.type_handler.deserialize_from_message(message) {
-                    Ok(bool_value) => {
-                        if let Err(e) = self.config.type_handler.print_boolean_output(bool_value) {
-                            debug!("error: Failed to print boolean output: {}", e);
-                            return Err(error_message_processing!(
-                                "Failed to print boolean output: {}",
-                                e
-                            ));
-                        }
-                        Ok(())
-                    }
-                    Err(e) => {
-                        debug!("error: {}", e);
-                        Err(error_message_processing!(
-                            "Failed to deserialize signal with signature: {:?}",
-                            body.signature()
-                        ))
-                    }
-                }
-            } // Add cases for other type handlers as they're implemented
-              // For now, this just covers the Boolean case
+        // Use the new unified process_message method from TypeHandler
+        match self.config.type_handler.process_message(message) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                debug!("error: {}", e);
+                Err(error_message_processing!(
+                    "Failed to process message with signature: {:?}: {}",
+                    body.signature(),
+                    e
+                ))
+            }
         }
     }
 }

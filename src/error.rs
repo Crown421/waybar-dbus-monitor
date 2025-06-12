@@ -52,9 +52,16 @@ impl AppError {
         format!("E{}", self.code())
     }
 
-    /// Print the error code to stdout for waybar
+    /// Print the error code to stdout for waybar in JSON format
     pub fn print_error_code(&self) {
-        println!("{}", self.format_for_waybar());
+        // The error code becomes the text, the error message becomes the tooltip
+        let error_code = self.format_for_waybar();
+        let error_message = self.to_string();
+        println!(
+            "{{\"text\": \"{}\", \"tooltip\": \"{}\"}}",
+            error_code, error_message
+        );
+        // No need to flush here as println! automatically flushes
     }
 
     /// Create a connection error

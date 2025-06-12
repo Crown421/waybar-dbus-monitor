@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use serde_json;
 use std::io::Write;
 use zbus::zvariant;
 
@@ -103,15 +104,10 @@ pub enum TypeHandler {
 
 impl TypeHandler {
     /// Extract a boolean from various zvariant::Value types
-    fn extract_boolean(&self, value: &zvariant::Value) -> Option<bool> {
+    fn extract_boolean(value: &zvariant::Value) -> Option<bool> {
         match value {
-            // Direct boolean
             zvariant::Value::Bool(b) => Some(*b),
-
-            // Handle variant inside variant (common with properties)
-            zvariant::Value::Value(v) => self.extract_boolean(v),
-
-            // Could not extract boolean
+            zvariant::Value::Value(v) => Self::extract_boolean(v),
             _ => {
                 log::debug!("warn: Could not extract boolean from value: {:?}", value);
                 None
@@ -119,67 +115,68 @@ impl TypeHandler {
         }
     }
 
-    /// Deserialize a boolean value directly from a D-Bus message
-    /// This optimizes the message handling by attempting direct type deserialization first
-    pub fn deserialize_from_message(&self, message: &zbus::Message) -> Result<bool, String> {
-        match self {
-            TypeHandler::Boolean { .. } => {
-                // Try direct boolean deserialization first for efficiency
-                match message.body().deserialize::<bool>() {
-                    Ok(value) => Ok(value),
-                    Err(_) => {
-                        // Fall back to generic deserialization and extraction
-                        match message.body().deserialize::<zvariant::Value>() {
-                            Ok(value) => self.extract_boolean(&value).ok_or_else(|| {
-                                format!("Could not extract boolean from value: {:?}", value)
-                            }),
-                            Err(e) => Err(format!("Failed to deserialize message: {}", e)),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Process the raw D-Bus data and print the result directly
-    /// Returns true if processing was successful, false otherwise
-    pub fn process_and_print(&self, value: &zvariant::Value) -> bool {
+    /// Helper method to format and print a boolean value as Waybar JSON
+    fn format_and_print_boolean(&self, value: bool) -> Result<(), String> {
         match self {
             TypeHandler::Boolean {
                 return_true,
                 return_false,
             } => {
-                if let Some(b) = self.extract_boolean(value) {
-                    let output = if b { return_true } else { return_false };
-                    println!("{}", output);
-                    // Flush stdout to ensure waybar gets the output immediately
-                    if let Err(e) = std::io::stdout().flush() {
-                        log::debug!("error: Failed to flush stdout: {}", e);
+                let text = if value { return_true } else { return_false };
+                let tooltip = if value { "enabled" } else { "disabled" };
+
+                // Use serde_json for proper escaping and formatting
+                let json_output = serde_json::json!({
+                    "text": text,
+                    "tooltip": tooltip
+                });
+
+                println!("{}", json_output);
+                std::io::stdout()
+                    .flush()
+                    .map_err(|e| format!("Failed to flush stdout: {}", e))
+            }
+        }
+    }
+
+    /// Process a D-Bus message and print formatted output
+    pub fn process_message(&self, message: &zbus::Message) -> Result<(), String> {
+        match self {
+            TypeHandler::Boolean { .. } => {
+                // Try direct boolean deserialization first for efficiency
+                let bool_value = message.body().deserialize::<bool>().or_else(|_| {
+                    // Fall back to generic deserialization and extraction
+                    message
+                        .body()
+                        .deserialize::<zvariant::Value>()
+                        .map_err(|e| format!("Failed to deserialize message: {}", e))
+                        .and_then(|value| {
+                            Self::extract_boolean(&value)
+                                .ok_or_else(|| format!("Could not extract boolean: {:?}", value))
+                        })
+                })?;
+
+                self.format_and_print_boolean(bool_value)
+            }
+        }
+    }
+
+    /// Process the raw D-Bus data and print the result
+    pub fn process_and_print(&self, value: &zvariant::Value) -> bool {
+        match self {
+            TypeHandler::Boolean { .. } => {
+                if let Some(b) = Self::extract_boolean(value) {
+                    match self.format_and_print_boolean(b) {
+                        Ok(_) => true,
+                        Err(e) => {
+                            log::debug!("error: {}", e);
+                            false
+                        }
                     }
-                    true
                 } else {
                     log::debug!("warn: Could not convert value to boolean: {:?}", value);
                     false
                 }
-            }
-        }
-    }
-
-    /// Print a formatted output based on a boolean value
-    /// This helper method is used to avoid code duplication
-    pub fn print_boolean_output(&self, value: bool) -> Result<(), String> {
-        match self {
-            TypeHandler::Boolean {
-                return_true,
-                return_false,
-            } => {
-                let output = if value { return_true } else { return_false };
-                println!("{}", output);
-                // Flush stdout to ensure waybar gets the output immediately
-                if let Err(e) = std::io::stdout().flush() {
-                    return Err(format!("Failed to flush stdout: {}", e));
-                }
-                Ok(())
             }
         }
     }
