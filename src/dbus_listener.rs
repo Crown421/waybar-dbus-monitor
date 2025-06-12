@@ -1,5 +1,6 @@
 use crate::cli::TypeHandler;
 use futures_util::stream::StreamExt;
+use log::{debug, error};
 use std::error::Error;
 use zbus::{Connection, MatchRule, MessageStream};
 
@@ -23,11 +24,11 @@ impl DBusListener {
         // Try to connect to session bus first, fallback to system bus
         let connection = match Connection::session().await {
             Ok(conn) => {
-                eprintln!("Connected to session bus");
+                debug!("Connected to session bus");
                 conn
             }
             Err(_) => {
-                eprintln!("Failed to connect to session bus, trying system bus");
+                debug!("Failed to connect to session bus, trying system bus");
                 Connection::system().await?
             }
         };
@@ -39,7 +40,7 @@ impl DBusListener {
             .member(self.member.as_str())?
             .build();
 
-        eprintln!(
+        debug!(
             "Adding match rule for interface: {}, member: {}",
             self.interface, self.member
         );
@@ -48,7 +49,7 @@ impl DBusListener {
         // This automatically registers the rule with the bus
         let mut stream = MessageStream::for_match_rule(match_rule, &connection, None).await?;
 
-        eprintln!("Listening for D-Bus signals...");
+        debug!("Listening for D-Bus signals...");
 
         // Main listening loop - now we only receive messages that match our criteria
         while let Some(msg) = stream.next().await {
@@ -64,7 +65,7 @@ impl DBusListener {
                                 println!("{}", output);
                             }
                             None => {
-                                eprintln!("Failed to process boolean value: {}", bool_value.0);
+                                error!("Failed to process boolean value: {}", bool_value.0);
                             }
                         }
                     } else {
@@ -75,19 +76,19 @@ impl DBusListener {
                                     println!("{}", output);
                                 }
                                 None => {
-                                    eprintln!("Failed to process signal value: {:?}", value);
+                                    error!("Failed to process signal value: {:?}", value);
                                 }
                             },
                             Err(e) => {
-                                eprintln!("Failed to deserialize message body: {}", e);
-                                eprintln!("Message signature: {:?}", message.body().signature());
-                                eprintln!("Raw body: {:?}", body);
+                                error!("Failed to deserialize message body: {}", e);
+                                debug!("Message signature: {:?}", message.body().signature());
+                                debug!("Raw body: {:?}", body);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error receiving message: {}", e);
+                    error!("Error receiving message: {}", e);
                     return Err(e.into());
                 }
             }

@@ -34,6 +34,16 @@ Monitor boolean values and return custom strings:
 cargo build --release
 ```
 
+## Debugging
+
+To enable debug logging, set the `RUST_LOG` environment variable before running the command:
+
+```bash
+RUST_LOG=debug waybar-dbus-monitor --interface org.example.Interface --member Signal boolean
+```
+
+This will show detailed information about D-Bus connections, match rules, and signal processing.
+
 ## Status
 
 🚧 **Work in Progress** - Currently implements CLI parsing. D-Bus monitoring functionality coming soon.

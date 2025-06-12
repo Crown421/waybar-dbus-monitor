@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use log::warn;
 use zbus::zvariant;
 
 #[derive(Parser, Debug)]
@@ -47,7 +48,7 @@ impl TypeHandler {
                     Some(output.clone())
                 } else {
                     // Log an error if the type doesn't match
-                    eprintln!("Warning: Expected boolean, got {:?}", body);
+                    warn!("Expected boolean, got {:?}", body);
                     None
                 }
             } // Future:
