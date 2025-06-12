@@ -10,8 +10,6 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     container: rust:1.87
-    permissions:
-      contents: write
 
     steps:
     - name: Checkout code
@@ -38,6 +36,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag'
+    permissions:
+      contents: write
 
     steps:
     - name: Download all artifacts
