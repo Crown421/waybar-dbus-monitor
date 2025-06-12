@@ -5,8 +5,15 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.45.1", features = ["rt", "macros"] }
 zbus = "5.7.1"
-futures-util = "0.3"
+futures-lite = "2.6"
 log = "0.4"
 env_logger = "0.11"
+
+[profile.release]
+lto = "fat"
+opt-level = "z"
+strip = true
+codegen-units = 1
+overflow-checks = false

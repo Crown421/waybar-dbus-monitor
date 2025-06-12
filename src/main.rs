@@ -5,7 +5,7 @@ use clap::Parser;
 use dbus_listener::DBusListener;
 use log::debug;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     env_logger::init();

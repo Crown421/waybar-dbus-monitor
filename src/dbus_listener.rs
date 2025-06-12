@@ -1,5 +1,5 @@
 use crate::cli::TypeHandler;
-use futures_util::stream::StreamExt;
+use futures_lite::stream::StreamExt;
 use log::{debug, error};
 use std::error::Error;
 use zbus::{Connection, MatchRule, MessageStream};
