@@ -1,35 +1,85 @@
-use crate::cli::TypeHandler;
+use crate::cli::Config;
 use crate::error::AppError;
 use crate::retry::retry_dbus_operation;
 use crate::{error_message_processing, error_not_found, error_service_unavailable, report_error};
 use futures_lite::stream::StreamExt;
-use log::{debug, error};
-use zbus::{Connection, MatchRule, MessageStream};
+use log::{debug, error, warn};
+use std::io::Write;
+use zbus::{Connection, MatchRule, MessageStream, Proxy};
 
 pub struct DBusListener {
-    pub interface: String,
-    pub member: String,
-    pub type_handler: TypeHandler,
+    pub config: Config,
 }
 
 impl DBusListener {
-    pub fn new(interface: String, member: String, type_handler: TypeHandler) -> Self {
-        Self {
-            interface,
-            member,
-            type_handler,
-        }
+    pub fn new(config: Config) -> Self {
+        Self { config }
     }
 
     /// Establish connection and listen for D-Bus signals with retry logic
     pub async fn listen(&self) -> Result<(), AppError> {
-        // Combine connection and stream setup into single retryable operation
+        let connection = retry_dbus_operation(
+            || async { self.establish_connection().await },
+            "D-Bus connection",
+        )
+        .await?;
+
+        // --- PHASE 1: Initial State Query ---
+        if let Some(status_config) = match self.config.parse_status() {
+            Ok(config) => config,
+            Err(e) => {
+                error!("Failed to parse status configuration: {}", e);
+                return Err(error_not_found!("Invalid status format: {}", e));
+            }
+        } {
+            let proxy = Proxy::new(
+                &connection,
+                status_config.service.as_str(),
+                status_config.object_path.as_str(),
+                status_config.interface.as_str(),
+            )
+            .await?;
+
+            match proxy
+                .get_property::<zbus::zvariant::Value>(&status_config.property)
+                .await
+            {
+                Ok(value) => {
+                    if let Some(output) = self.config.type_handler.process(&value) {
+                        println!("{}", output);
+                        // Flush stdout
+                        if let Err(e) = std::io::stdout().flush() {
+                            error!("Failed to flush stdout: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Check if this is a "not found" type error for interface/service availability
+                    if e.to_string().contains("not found")
+                        || e.to_string().contains("NotFound")
+                        || e.to_string().contains("ServiceUnknown")
+                        || e.to_string().contains("UnknownObject")
+                    {
+                        return Err(error_service_unavailable!(
+                            "D-Bus interface '{}' or monitor '{}' not available: {}",
+                            self.config.interface,
+                            self.config.monitor,
+                            e
+                        ));
+                    } else {
+                        warn!(
+                            "Warning: Could not get initial property '{}': {}",
+                            status_config.property, e
+                        );
+                    }
+                }
+            }
+        }
+
+        // --- PHASE 2: Signal Listening ---
         let mut stream = retry_dbus_operation(
-            || async {
-                let connection = self.establish_connection().await?;
-                self.setup_message_stream(&connection).await
-            },
-            "D-Bus connection and setup",
+            || async { self.setup_message_stream(&connection).await },
+            "D-Bus message stream setup",
         )
         .await?;
 
@@ -92,33 +142,22 @@ impl DBusListener {
         // Create a match rule for the specific signal
         let match_rule: MatchRule<'_> = MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
-            .interface(self.interface.as_str())
-            .map_err(|e| error_not_found!("Invalid interface '{}': {}", self.interface, e))?
-            .member(self.member.as_str())
-            .map_err(|e| error_not_found!("Invalid member '{}': {}", self.member, e))?
+            .interface(self.config.interface.as_str())
+            .map_err(|e| error_not_found!("Invalid interface '{}': {}", self.config.interface, e))?
+            .member(self.config.monitor.as_str())
+            .map_err(|e| error_not_found!("Invalid monitor '{}': {}", self.config.monitor, e))?
             .build();
 
         debug!(
-            "Adding match rule for interface: {}, member: {}",
-            self.interface, self.member
+            "Adding match rule for interface: {}, monitor: {}",
+            self.config.interface, self.config.monitor
         );
 
         // Create a filtered message stream for our match rule
         // This automatically registers the rule with the bus
         let stream = MessageStream::for_match_rule(match_rule, connection, None)
             .await
-            .map_err(|e| {
-                // Check if this is a "not found" type error
-                if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                    error_service_unavailable!(
-                        "D-Bus interface '{}' or member '{}' not available",
-                        self.interface,
-                        self.member
-                    )
-                } else {
-                    AppError::from(e)
-                }
-            })?;
+            .map_err(AppError::from)?;
 
         Ok(stream)
     }
@@ -130,7 +169,7 @@ impl DBusListener {
         // Try to deserialize as a single Value - this handles most cases
         match body.deserialize::<(zbus::zvariant::Value,)>() {
             Ok((value,)) => {
-                if let Some(output) = self.type_handler.process(&value) {
+                if let Some(output) = self.config.type_handler.process(&value) {
                     println!("{}", output);
                     Ok(())
                 } else {

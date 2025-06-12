@@ -15,10 +15,26 @@ async fn main() -> Result<(), AppError> {
 
     let config = cli::Config::parse();
 
+    // Validate configuration
+    if let Err(e) = config.validate() {
+        eprintln!("Configuration error: {}", e);
+        std::process::exit(1);
+    }
+
     debug!("Starting waybar-dbus-monitor");
     debug!("Interface: {}", config.interface);
-    debug!("Member: {}", config.member);
+    debug!("Monitor: {}", config.monitor);
     debug!("Type handler: {:?}", config.type_handler);
+
+    if let Some(status) = &config.status {
+        debug!("Status configuration: {}", status);
+        if let Ok(Some(status_config)) = config.parse_status() {
+            debug!("  Service: {}", status_config.service);
+            debug!("  Object path: {}", status_config.object_path);
+            debug!("  Interface: {}", status_config.interface);
+            debug!("  Property: {}", status_config.property);
+        }
+    }
 
     match &config.type_handler {
         cli::TypeHandler::Boolean {
@@ -31,7 +47,7 @@ async fn main() -> Result<(), AppError> {
         }
     }
 
-    let listener = DBusListener::new(config.interface, config.member, config.type_handler);
+    let listener = DBusListener::new(config);
 
     // Handle errors by printing error codes for waybar
     if let Err(error) = listener.listen().await {
