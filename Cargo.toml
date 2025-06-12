@@ -4,12 +4,18 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.40", features = ["derive"] }
-tokio = { version = "1.45.1", features = ["rt", "macros"] }
-zbus = "5.7.1"
-futures-lite = "2.6"
-log = "0.4"
-env_logger = "0.11"
+clap = { version = "4.5.40", features = [
+    "derive",
+    "std",
+], default-features = false }
+tokio = { version = "1.45.1", features = [
+    "rt",
+    "macros",
+], default-features = false }
+zbus = { version = "5.7.1", features = ["tokio"], default-features = false }
+futures-lite = { version = "2.6", default-features = false, features = ["std"] }
+log = { version = "0.4", default-features = false }
+env_logger = { version = "0.11", default-features = false }
 
 [profile.release]
 lto = "fat"
