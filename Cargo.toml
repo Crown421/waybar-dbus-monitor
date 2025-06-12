@@ -1,0 +1,9 @@
+[package]
+name = "waybar-dbus-monitor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = "4.5.40"
+tokio = "1.45.1"
+zbus = "5.7.1"
