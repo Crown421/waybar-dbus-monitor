@@ -30,7 +30,7 @@ pub enum TypeHandler {
         #[arg(long, default_value = "false")]
         return_false: String,
     },
-    // Future expansion:
+    // TODO: Implement additional type handlers:
     // String { ... },
     // Integer { ... },
 }
@@ -51,8 +51,7 @@ impl TypeHandler {
                     warn!("Expected boolean, got {:?}", body);
                     None
                 }
-            } // Future:
-              // TypeHandler::String { prefix, suffix } => { ... }
+            }
         }
     }
 }

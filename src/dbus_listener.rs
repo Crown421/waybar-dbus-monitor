@@ -27,8 +27,9 @@ impl DBusListener {
                 debug!("Connected to session bus");
                 conn
             }
-            Err(_) => {
-                debug!("Failed to connect to session bus, trying system bus");
+            Err(e) => {
+                debug!("Failed to connect to session bus: {}", e);
+                debug!("Trying system bus");
                 Connection::system().await?
             }
         };
@@ -55,36 +56,9 @@ impl DBusListener {
         while let Some(msg) = stream.next().await {
             match msg {
                 Ok(message) => {
-                    let body = message.body();
-
-                    // For boolean signals, try to deserialize directly as boolean first
-                    if let Ok(bool_value) = body.deserialize::<(bool,)>() {
-                        let value = zbus::zvariant::Value::Bool(bool_value.0);
-                        match self.type_handler.process(&value) {
-                            Some(output) => {
-                                println!("{}", output);
-                            }
-                            None => {
-                                error!("Failed to process boolean value: {}", bool_value.0);
-                            }
-                        }
-                    } else {
-                        // Fallback: try to get as generic Value tuple
-                        match body.deserialize::<(zbus::zvariant::Value,)>() {
-                            Ok((value,)) => match self.type_handler.process(&value) {
-                                Some(output) => {
-                                    println!("{}", output);
-                                }
-                                None => {
-                                    error!("Failed to process signal value: {:?}", value);
-                                }
-                            },
-                            Err(e) => {
-                                error!("Failed to deserialize message body: {}", e);
-                                debug!("Message signature: {:?}", message.body().signature());
-                                debug!("Raw body: {:?}", body);
-                            }
-                        }
+                    if let Err(e) = self.process_message(&message) {
+                        error!("Error processing message: {}", e);
+                        // Continue listening rather than crashing on a single message error
                     }
                 }
                 Err(e) => {
@@ -95,5 +69,28 @@ impl DBusListener {
         }
 
         Ok(())
+    }
+
+    /// Process a single D-Bus message and print the result
+    fn process_message(&self, message: &zbus::Message) -> Result<(), Box<dyn Error>> {
+        let body = message.body();
+
+        // Try to deserialize as a single Value - this handles most cases
+        match body.deserialize::<(zbus::zvariant::Value,)>() {
+            Ok((value,)) => {
+                if let Some(output) = self.type_handler.process(&value) {
+                    println!("{}", output);
+                    Ok(())
+                } else {
+                    Err(format!("Failed to process signal value: {:?}", value).into())
+                }
+            }
+            Err(e) => {
+                error!("Failed to deserialize message body: {}", e);
+                debug!("Message signature: {:?}", message.body().signature());
+                debug!("Raw body: {:?}", body);
+                Err(e.into())
+            }
+        }
     }
 }

@@ -31,11 +31,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and start the D-Bus listener
     let listener = DBusListener::new(config.interface, config.member, config.type_handler);
 
-    // Start listening (this will run indefinitely until an error occurs)
-    if let Err(e) = listener.listen().await {
-        eprintln!("D-Bus listener error: {}", e);
-        std::process::exit(1);
-    }
+    // Simply return the error - no need for manual exit
+    listener.listen().await?;
 
     Ok(())
 }
