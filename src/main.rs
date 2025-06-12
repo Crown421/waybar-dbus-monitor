@@ -1,21 +1,40 @@
 mod cli;
 mod dbus_listener;
+mod error;
+mod retry;
 
 use clap::Parser;
 use dbus_listener::DBusListener;
+use error::AppError;
 use log::debug;
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), AppError> {
     // Initialize logger
     env_logger::init();
 
     let config = cli::Config::parse();
 
+    // Validate configuration
+    if let Err(e) = config.validate() {
+        debug!("error: Configuration error: {}", e);
+        std::process::exit(1);
+    }
+
     debug!("Starting waybar-dbus-monitor");
     debug!("Interface: {}", config.interface);
-    debug!("Member: {}", config.member);
+    debug!("Monitor: {}", config.monitor);
     debug!("Type handler: {:?}", config.type_handler);
+
+    if let Some(status) = &config.status {
+        debug!("Status configuration: {}", status);
+        if let Ok(Some(status_config)) = config.parse_status() {
+            debug!("  Service: {}", status_config.service);
+            debug!("  Object path: {}", status_config.object_path);
+            debug!("  Interface: {}", status_config.interface);
+            debug!("  Property: {}", status_config.property);
+        }
+    }
 
     match &config.type_handler {
         cli::TypeHandler::Boolean {
@@ -28,13 +47,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Create and start the D-Bus listener
-    let listener = DBusListener::new(config.interface, config.member, config.type_handler);
+    let listener = DBusListener::new(config);
 
-    // Start listening (this will run indefinitely until an error occurs)
-    if let Err(e) = listener.listen().await {
-        eprintln!("D-Bus listener error: {}", e);
-        std::process::exit(1);
+    // Run the listener, catching any fatal errors
+    if let Err(error) = listener.listen().await {
+        debug!("error: Fatal error: {}", error);
+
+        // Print only the error code for waybar (e.g., "E502")
+        error.print_error_code();
+        std::process::exit(error.code() as i32);
     }
 
     Ok(())
